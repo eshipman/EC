@@ -33,6 +33,8 @@ output[input[i] % keylen] = i
 ```
 Of course, this requires removing the filled elements from the list of elements that are counted in the output array. It feels like a difficult idea to convey in a small english paragraph and I believe the code does a much better job.
 
+The S-Boxes are 'filled' from the P-Boxes by simply copying every 2 bytes as 1 row in the S-Box.
+
 ### Key Schedule
 The key schedules were originally an LCG or Xorshift applied to the key iteratively, however this design was deemed too simple. The current design for the key schedule is a series of LCGs and Xorshifts applied to different pieces of the key in a hierarchical Feistel-like structure, as shown in the diagram ```Key_Schedule.png``` under EC-1's subdirectory.
 
