@@ -7,8 +7,15 @@
 
 #include "defs.h"
 
+#define SWAP(type, a, b) {  \
+    type tmp = a;           \
+    a = b;                  \
+    b = tmp;                \
+}
+
 uint32_t char_to_int(uint8_t*);
 uint64_t char_to_long(uint8_t*);
+void long_to_char(uint64_t, uint8_t*);
 
 /*
  * Convert a pseudorandom stream to a permutation
@@ -42,8 +49,7 @@ uint8_t* to_permutation(uint8_t *stream, uint32_t length)
  * Apply a Lagged Fibonacci Generator to a 10-byte seed, using j = 7 and k = 10
  * A length of 0 returns the seed
  */
-uint8_t* lfg(uint8_t *seed, uint32_t length, uint32_t J,
-    uint32_t K)
+uint8_t* lfg(uint8_t *seed, uint32_t length, uint32_t J, uint32_t K)
 {
     if (length < 1)
         return seed;
@@ -93,14 +99,12 @@ uint32_t lcg(uint32_t seed)
 /*
  * Generate a variable number of bytes using an LCG.
  */
-uint8_t* lcg_bytes(
-    uint8_t seed[sizeof(uint32_t) / sizeof(uint8_t)],
-    uint32_t length)
+uint8_t* lcg_bytes(uint8_t seed[sizeof(uint32_t)], uint32_t length)
 {
     /* Define the value for each generation and the output value */
     uint32_t x = *(uint32_t*) seed;
-    uint8_t *output = (uint8_t*) malloc(length * sizeof(uint8_t));
-    memset(output, 0, length * sizeof(uint8_t));
+    uint8_t *output = (uint8_t*) malloc(length);
+    memset(output, 0, length);
 
     /* Apply the LCG, extract the upper 16 bits each time */
     for (int i = 0; i < length; i += 2) {
@@ -127,14 +131,12 @@ uint64_t xorshift(uint64_t seed)
 /*
  * Generate a variable number of bytes using xorshift
  */
-uint8_t* xorshift_bytes(
-    uint8_t seed[sizeof(uint64_t)/sizeof(uint8_t)],
-    uint32_t length)
+uint8_t* xorshift_bytes(uint8_t seed[sizeof(uint64_t)], uint32_t length)
 {
     /* Define the value for each generation and the output value */
     uint64_t x = *(uint64_t*) seed;
-    uint8_t *output = (uint8_t*) malloc(length * sizeof(uint8_t));
-    memset(output, 0, length * sizeof(uint8_t));
+    uint8_t *output = (uint8_t*) malloc(length);
+    memset(output, 0, length);
 
     /* Apply the xorshift, converting to a char array */
     for (int i = 0; i < length; i += 8) {
@@ -152,24 +154,18 @@ uint8_t* xorshift_bytes(
  */
 uint8_t* roundkey(uint8_t* key, uint32_t length)
 {
-    uint8_t *output = (uint8_t*) malloc(length * sizeof(uint8_t));
+    uint8_t *output = (uint8_t*) malloc(length);
     if (length == 16) {
         uint32_t l0 = char_to_int(key),
-                     l1 = char_to_int(key + 4);
-        uint64_t r = ((uint64_t) char_to_int(key + 8) << 32) 
-                        ^ ((uint64_t) char_to_int(key + 12)),
-                      l = 0,
-                      tmp = 0;
+                 l1 = char_to_int(key + 4);
+        uint64_t r = char_to_long(key + 8),
+                 l = 0;
         l = ((uint64_t) lcg(l1) << 32) + (lcg(l1) ^ lcg(l0));
-        printf("l0 = %x -> %x\nl1 = %x -> %x\nr = %x\n", char_to_int(key), l0, char_to_int(key + sizeof(uint32_t)), l1, r);
-        printf("rr = %x\n", char_to_long(key + 8));
         r = xorshift(r);
-        
-        tmp = r;
-        r ^= l;
-        l = tmp;
-        memcpy(output, (uint8_t*) &l, sizeof(uint8_t) * sizeof(uint64_t));
-        memcpy(output + sizeof(uint64_t), (uint8_t*) &r, sizeof(uint8_t) * sizeof(uint64_t));
+        SWAP(uint64_t, l, r)
+        r = r ^ l;
+        long_to_char(l, output);
+        long_to_char(r, output + sizeof(uint64_t));
     } else if (length == 192) {
         memcpy(output, key, length);
     } else if (length == 256) {
@@ -183,9 +179,9 @@ uint8_t* roundkey(uint8_t* key, uint32_t length)
  */
 uint32_t get_xy(uint8_t data)
 {
-    unsigned short x = (data >> 1) & 0x3,
+    uint16_t x = (data >> 1) & 0x3,
                    y = ((data & 0x8) >> 2) | (data & 0x1);
-    return (x << sizeof(unsigned short)) | y;
+    return (x << sizeof(uint16_t)) | y;
 }
 
 /*
@@ -202,14 +198,16 @@ int sub(uint8_t **data, uint8_t *s)
         uint32_t l = get_xy((*data)[i] >> 4),
                      r = get_xy((*data)[i] & 0xF);
         /* Get the substituted value and place it back into data */
-        uint8_t l_subbed = s[(l >> sizeof(unsigned short)) * S_WIDTH + (l & 0xF)],
-                      r_subbed = s[(r >> sizeof(unsigned short)) * S_WIDTH + (r & 0xF)];
+        uint8_t l_subbed = s[(l >> sizeof(uint16_t)) * S_WIDTH + (l & 0xF)],
+                      r_subbed = s[(r >> sizeof(uint16_t)) * S_WIDTH + (r & 0xF)];
         (*data)[i] = (l_subbed << 4) | (r_subbed & 0xF);
     }
 }
 
-uint8_t *p_gen(uint8_t *seed, uint32_t length, uint32_t J, 
-    uint32_t K)
+/*
+ * Generate the P-Boxes
+ */
+uint8_t *p_gen(uint8_t *roundkey, uint32_t keylen)
 {
     /* Define the stream and output */
     uint8_t *stream,
@@ -226,7 +224,7 @@ uint8_t *p_gen(uint8_t *seed, uint32_t length, uint32_t J,
 }
 
 /*
- * Convert a char array to an uint32_t
+ * Convert a char array to a uint32_t
  */
 uint32_t char_to_int(uint8_t *input)
 {
@@ -237,14 +235,20 @@ uint32_t char_to_int(uint8_t *input)
 }
 
 /*
- * Convert a char array to an uint64_t
+ * Convert a char array to a uint64_t
  */
 uint64_t char_to_long(uint8_t *input)
 {
-    uint64_t output = 0;
+    return ((uint64_t) char_to_int(input) << 32) ^ char_to_int(input + 4);
+}
+
+/*
+ * Convert a uint64_t to a char array
+ */
+void long_to_char(uint64_t input, uint8_t *output)
+{
     for (int i = 0; i < sizeof(uint64_t); i++)
-        output ^= input[i] << ((sizeof(uint64_t) - i - 1) * 8);
-    return output;
+        output[i] = (uint8_t) (input >> ((sizeof(uint64_t) - i - 1) * 8));
 }
 
 
@@ -292,7 +296,7 @@ int main(int argc, char **argv)
      * Output: Permutation computed by hand
      */
     uint8_t p_correct[BLOCKSIZE] = {14, 0, 1, 12, 2, 8, 3, 6, 7, 4, 13, 15, 11, 5, 10, 9};
-    uint8_t *p_fib = (uint8_t*) malloc(sizeof(uint8_t) * BLOCKSIZE);
+    uint8_t *p_fib = (uint8_t*) malloc(BLOCKSIZE);
     for (int i = 0; i < BLOCKSIZE; i++)
         p_fib[i] = (uint8_t) fib(i) % (BLOCKSIZE - i);
 
@@ -429,27 +433,15 @@ int main(int argc, char **argv)
     /*
      * Function: roundkey()
      * Input: A test key
-     * Output: A round key computed by hand
+     * Output: A 128-bit round key computed by hand
      */
     uint8_t key[16] = {0x12, 0x34, 0x56, 0x78, 0x56, 0x78, 0x12, 0x34, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
-    uint8_t key_correct[16] = {0x3F, 0x28, 0x00, 0xD6, 0x56, 0x9e, 0x01, 0xB4, 0x3B, 0x77, 0xF9, 0x23, 0xE5, 0x25, 0xB9, 0x70};
+    uint8_t key_correct[16] = {0x3F, 0x28, 0x00, 0xD6, 0x56, 0x9e, 0x01, 0xB4, 0x7A, 0xD7, 0x9F, 0x8D, 0x55, 0x25, 0xB9, 0x70};
     uint8_t *rkey = roundkey(key, 16);
     for (int i = 0; i < 16; i++)
-        if (rkey[i] != key_correct[i]);
+        if (rkey[i] != key_correct[i])
             fail(&TEST_RESULT, 8);
 
-    for (int i = 0; i < 16; i++)
-        printf("%x ", key_correct[i]);
-    printf("\n");
-    for (int i = 0; i < 16; i++)
-        printf("%x ", rkey[i]);
-    printf("\n");
-
-    //uint64_t conv = ((uint64_t) char_to_int(key + 8));
-    uint64_t conv = ((uint64_t) char_to_int(key + 8) << 32) 
-                        ^ ((uint64_t) char_to_int(key + 12));
-    printf("Conv = %x%x\n", char_to_int(key + 8), char_to_int(key + sizeof(uint32_t) + 8));
-    printf("conv2= %lu\n", conv);
 
     get_result(TEST_RESULT, 8);
     printf("roundkey()\n");
@@ -459,7 +451,7 @@ int main(int argc, char **argv)
     
 
     /*
-     * Function: round()
+     * Function: get_xy()
      * Input:
      * Output:
      */
@@ -472,7 +464,7 @@ int main(int argc, char **argv)
 
 
     /*
-     * Function: get_xy()
+     * Function: sub()
      * Input:
      * Output:
      */
@@ -486,7 +478,7 @@ int main(int argc, char **argv)
 
 
     /*
-     * Function: sub()
+     * Function: p_gen()
      * Input:
      * Output:
      */
@@ -500,7 +492,7 @@ int main(int argc, char **argv)
 
 
     /*
-     * Function: p_gen()
+     * Function: round()
      * Input:
      * Output:
      */

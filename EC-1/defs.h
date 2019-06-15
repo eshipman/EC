@@ -8,15 +8,14 @@
 #define FAIL 1
 
 #define BLOCKSIZE 128 / 8
-#define ROUNDS 21
 
 /* LCG constants taken from cc65 */
 #define A 16843009
 #define C 826366247
 #define M 4294967296
 
-unsigned char **P = NULL;
-unsigned char **S = NULL;
+uint8_t **P = NULL;
+uint8_t **S = NULL;
 
 #define S_WIDTH 4
 #define S_HEIGHT 4
