@@ -16,6 +16,7 @@
 
 uint8_t **P = NULL;
 uint8_t **S = NULL;
+uint8_t **K = NULL;
 
 #define S_WIDTH 4
 #define S_HEIGHT 4

@@ -180,7 +180,7 @@ uint8_t* roundkey(uint8_t* key, uint32_t length)
 uint32_t get_xy(uint8_t data)
 {
     uint16_t x = (data >> 1) & 0x3,
-                   y = ((data & 0x8) >> 2) | (data & 0x1);
+             y = ((data & 0x8) >> 2) | (data & 0x1);
     return (x << sizeof(uint16_t)) | y;
 }
 
@@ -205,22 +205,37 @@ int sub(uint8_t **data, uint8_t *s)
 }
 
 /*
- * Generate the P-Boxes
+ * Generate the P-Boxes and round keys
  */
-uint8_t *p_gen(uint8_t *roundkey, uint32_t keylen)
+uint8_t *setup(uint8_t *key, uint32_t keylen)
 {
-    /* Define the stream and output */
-    uint8_t *stream,
-                  *output;
+    uint8_t rounds;
 
-    /* Generate a pseudorandom stream and convert it to a permutation */
-    stream = lfg(seed, length, J, K);
-    output = to_permutation(stream, length);
+    /* Make sure the keylength is valid */
+    if (keylen % 64)
+        rounds = 0;
+    else
+        rounds = 6 + 6 * keylen / 64;
+    
+    /* Make sure the P-Box hasn't been allocated */
+    if (P != NULL)
+        return NULL;
+    else if (K != NULL)
+        return NULL;
+    else if (S != NULL)
+        return NULL;
+    
+    /* Allocate the P-Box and round keys */
+    P = (uint8_t**) malloc(rounds * sizeof(uint8_t*));
+    K = (uint8_t**) malloc(rounds * sizeof(uint8_t*));
 
-    /* Free malloc'd memory */
-    free(stream);
-
-    return output;
+    /* Compute the round keys and P-Box */
+    for (int i = 0; i < rounds; i++) {
+        //K[i] = (i > 0) ? roundkey(K[i - 1], keylen) : roundkey(key, keylen);
+        K[i] = roundkey((i > 0) ? K[i - 1] : key, keylen);
+        P[i] = to_permutation(xorshift_bytes(K[i], BLOCKSIZE), keylen);
+    }
+    
 }
 
 /*
@@ -478,7 +493,7 @@ int main(int argc, char **argv)
 
 
     /*
-     * Function: p_gen()
+     * Function: setup()
      * Input:
      * Output:
      */
@@ -501,7 +516,7 @@ int main(int argc, char **argv)
     fail(&TEST_RESULT, 12);
 
     get_result(TEST_RESULT, 12);
-    printf("p_gen()\n");
+    printf("setup()\n");
 
 
     printf("... done\n");
