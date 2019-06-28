@@ -22,7 +22,7 @@ void long_to_char(uint64_t, uint8_t*);
  */
 uint8_t* to_permutation(uint8_t *stream, uint32_t length)
 {
-    uint8_t *output = (uint8_t*) malloc(length * sizeof(char));
+    uint8_t *output = (uint8_t*) malloc(length);
     int *tmp = (int*) malloc(length * sizeof(int));
 
     /* Set the output array to -1 */
@@ -133,18 +133,28 @@ uint64_t xorshift(uint64_t seed)
  */
 uint8_t* xorshift_bytes(uint8_t seed[sizeof(uint64_t)], uint32_t length)
 {
-    /* Define the value for each generation and the output value */
-    uint64_t x = *(uint64_t*) seed;
-    uint8_t *output = (uint8_t*) malloc(length);
-    memset(output, 0, length);
+    /*
+     * Define the value for each generation and the output value. Allocate the
+     * output buffer to be a multiple of 8 bytes. After it's filled, reallocate
+     * the buffer to be the correct size.
+     */
+    //uint64_t x = *(uint64_t*) seed,
+    uint64_t x = char_to_long(seed),
+             output_len = length + (
+                 (length % sizeof(uint64_t) != 0) ?
+                    sizeof(uint64_t) - (length % sizeof(uint64_t)) :
+                    0);
+    uint8_t *output = (uint8_t*) malloc(output_len);
+    memset(output, 0, output_len);
 
     /* Apply the xorshift, converting to a char array */
     for (int i = 0; i < length; i += 8) {
         x = xorshift(x);
-        uint8_t *tmp = (uint8_t*) &x;
-        for (int j = 0; j < 8 && i + j < length; j++)
-            output[i + j] = tmp[j];
+        long_to_char(x, output + i);
     }
+
+    /* Resize to the requested size */
+    output = realloc(output, length);
 
     return output;
 }
@@ -205,9 +215,9 @@ int sub(uint8_t **data, uint8_t *s)
 }
 
 /*
- * Generate the P-Boxes and round keys
+ * Generate the P-Boxes, S-Boxes, and round keys
  */
-uint8_t *setup(uint8_t *key, uint32_t keylen)
+uint8_t setup(uint8_t *key, uint32_t keylen)
 {
     uint8_t rounds;
 
@@ -219,23 +229,26 @@ uint8_t *setup(uint8_t *key, uint32_t keylen)
     
     /* Make sure the P-Box hasn't been allocated */
     if (P != NULL)
-        return NULL;
+        return 0;
     else if (K != NULL)
-        return NULL;
+        return 0;
     else if (S != NULL)
-        return NULL;
+        return 0;
     
-    /* Allocate the P-Box and round keys */
+    /* Allocate the P-Boxes, S-Boxes, and round keys */
     P = (uint8_t**) malloc(rounds * sizeof(uint8_t*));
+    S = (uint8_t**) malloc(rounds * sizeof(uint8_t*));
     K = (uint8_t**) malloc(rounds * sizeof(uint8_t*));
 
-    /* Compute the round keys and P-Box */
+    /* Compute the round keys, P-Box, and S-Boxes */
     for (int i = 0; i < rounds; i++) {
-        //K[i] = (i > 0) ? roundkey(K[i - 1], keylen) : roundkey(key, keylen);
         K[i] = roundkey((i > 0) ? K[i - 1] : key, keylen);
         P[i] = to_permutation(xorshift_bytes(K[i], BLOCKSIZE), keylen);
+        S[i] = (uint8_t*) malloc(BLOCKSIZE);
+        S[i] = memcpy(S[i], P[i], BLOCKSIZE);
     }
     
+    return rounds;
 }
 
 /*
@@ -245,7 +258,7 @@ uint32_t char_to_int(uint8_t *input)
 {
     uint32_t output = 0;
     for (int i = 0; i < sizeof(uint32_t); i++)
-        output ^= input[i] << ((sizeof(uint32_t) - i - 1) * 8);
+        output ^= input[sizeof(uint32_t) - 1 - i] << (i * 8);
     return output;
 }
 
@@ -254,7 +267,11 @@ uint32_t char_to_int(uint8_t *input)
  */
 uint64_t char_to_long(uint8_t *input)
 {
-    return ((uint64_t) char_to_int(input) << 32) ^ char_to_int(input + 4);
+    uint64_t output = 0;
+    for (int i = 0; i < sizeof(uint64_t); i++)
+        output ^= ((uint64_t) input[sizeof(uint64_t) - 1 - i]) << (i * 8);
+    return output;
+    //return ((uint64_t) char_to_int(input) << 32) | char_to_int(input + 4);
 }
 
 /*
@@ -263,7 +280,35 @@ uint64_t char_to_long(uint8_t *input)
 void long_to_char(uint64_t input, uint8_t *output)
 {
     for (int i = 0; i < sizeof(uint64_t); i++)
-        output[i] = (uint8_t) (input >> ((sizeof(uint64_t) - i - 1) * 8));
+        output[sizeof(uint64_t) - 1 - i] = (uint8_t) (input >> (i * 8));
+        //output[i] = (uint8_t) (input >> ((sizeof(uint64_t) - i - 1) * 8));
+}
+
+/*
+ * Encrypt the plaintext with the given key.
+ */
+uint8_t* encrypt(uint8_t *ptext, uint8_t *key)
+{
+    /* Setup the parameters, define the rounds, and allocate the output */
+    uint8_t rounds = setup(key, 128);
+    uint8_t *output = (uint8_t*) malloc(BLOCKSIZE);
+
+    /* Copy the plaintext to start with */
+    memcpy(output, ptext, BLOCKSIZE);
+
+    for (int i = 0; i < rounds; i++) {
+        /* Run the text through the P-Box */
+        uint8_t *permed = permutate(output, P[i]);
+
+        /* XOR the text with the round key */
+        for (int j = 0; j < BLOCKSIZE; j++)
+            permed[i] ^= K[i][j];
+        
+        /* Copy the output to the output variable and free it */
+        memcpy(output, permed, BLOCKSIZE);
+        free(permed);
+    }
+    return output;
 }
 
 
@@ -431,6 +476,7 @@ int main(int argc, char **argv)
 
     get_result(TEST_RESULT, 6);
     printf("xorshift()\n");
+    
 
 
     /*
@@ -438,11 +484,17 @@ int main(int argc, char **argv)
      * Input:
      * Output:
      */
-
-    fail(&TEST_RESULT, 7);
+    uint8_t xorshift_bytes_seed[sizeof(uint64_t)],
+            *xorshift_bytes_output;
+    long_to_char(xorshift_seed, xorshift_bytes_seed);
+    xorshift_bytes_output = xorshift_bytes(xorshift_bytes_seed, sizeof(uint64_t));
+    if (char_to_long(xorshift_bytes_output) != xorshift_output)
+        fail(&TEST_RESULT, 7);
 
     get_result(TEST_RESULT, 7);
     printf("xorshift_bytes()\n");
+
+    free(xorshift_bytes_output);
     
 
     /*
@@ -475,7 +527,7 @@ int main(int argc, char **argv)
     fail(&TEST_RESULT, 9);
 
     get_result(TEST_RESULT, 9);
-    printf("round()\n");
+    printf("get_xy()\n");
 
 
     /*
@@ -489,7 +541,7 @@ int main(int argc, char **argv)
 
     /* Report on the unit test */
     get_result(TEST_RESULT, 10);
-    printf("get_xy()\n");
+    printf("sub()\n");
 
 
     /*
@@ -503,20 +555,26 @@ int main(int argc, char **argv)
 
     /* Report on the unit test */
     get_result(TEST_RESULT, 11);
-    printf("sub()\n");
+    printf("setup()\n");
 
 
     /*
-     * Function: round()
+     * Function: encrypt()
      * Input:
      * Output:
      */
-
-
+    uint8_t *ptext = "12345678";
+    uint8_t *enc_key = "87654321";
+    uint8_t *ctext = encrypt(ptext, enc_key);
+    printf("ctext = ");
+    for (int i = 0; i < 8; i++)
+        printf("%x:", ctext[i]);
+    printf("\n");
     fail(&TEST_RESULT, 12);
 
+
     get_result(TEST_RESULT, 12);
-    printf("setup()\n");
+    printf("encrypt()\n");
 
 
     printf("... done\n");
