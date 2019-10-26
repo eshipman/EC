@@ -17,33 +17,7 @@ uint32_t char_to_int(uint8_t*);
 uint64_t char_to_long(uint8_t*);
 void long_to_char(uint64_t, uint8_t*);
 
-/*
- * Convert a pseudorandom stream to a permutation
- */
-uint8_t* to_permutation(uint8_t *stream, uint32_t length)
-{
-    uint8_t *output = (uint8_t*) malloc(length);
-    int *tmp = (int*) malloc(length * sizeof(int));
 
-    /* Set the output array to -1 */
-    memset(tmp, -1, sizeof(int) * length);
-
-    /* Create a permutation from the pseudorandom sequence */
-    for (int i = 0, j = length; i < length && j > 0; i++, j--) {
-        /* Calculate the position the number should be */
-        int pos = stream[i] % j;
-        int k;
-        /* Find the pos'th empty element */
-        for (k = 0; k < length && pos >= 0; k++)
-            if (tmp[k] == -1)
-                pos--;
-        output[k - 1] = i;
-        tmp[k - 1] = i;
-    }
-    free(tmp);
-
-    return output;
-}
 
 /*
  * Apply a Lagged Fibonacci Generator to a 10-byte seed, using j = 7 and k = 10
