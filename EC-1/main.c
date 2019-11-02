@@ -7,7 +7,7 @@
 #include "defs.h"
 
 /*
- * FUNCTION: char_to_32
+ * FUNCTION: char_to_uint32
  * --------------------
  * Converts a char[4] to an unsigned int. Always use little-endian order
  *
@@ -17,7 +17,7 @@
  * RETURN: The 32-bit representation in little-endian order
  */
 uint32_t
-char_to_32(const uint8_t chars[4])
+char_to_uint32(const uint8_t chars[4])
 {
     uint32_t out;
 
@@ -32,7 +32,7 @@ char_to_32(const uint8_t chars[4])
 }
 
 /*
- * FUNCTION: char_to_64
+ * FUNCTION: char_to_uint64
  * ----------------------
  * Converts a char[8] to an unsigned long. Always use little-endian order
  *
@@ -42,7 +42,7 @@ char_to_32(const uint8_t chars[4])
  * RETURN: The 64-bit integer representation in little-endian order
  */
 uint64_t
-char_to_64(const uint8_t chars[8])
+char_to_uint64(const uint8_t chars[8])
 {
     uint64_t out;
 
@@ -53,6 +53,37 @@ char_to_64(const uint8_t chars[8])
               (((uint64_t) chars[2]) << 40) | (((uint64_t) chars[3]) << 32) |
               (((uint64_t) chars[4]) << 24) | (((uint64_t) chars[5]) << 16) |
               (((uint64_t) chars[6]) << 8)  | chars[7];
+    }
+
+    return out;
+}
+
+/*
+ * FUNCTION: uint64_to_char
+ * ------------------------
+ * Converts a uint64_t to a char array. Always use little endian order
+ *
+ * INPUT:
+ *  out: The destination to store the result
+ *  num: The uint64_t to convert to chars
+ *
+ * RETURN: A pointer to the char[8] representation in little endian order
+ */
+uint8_t*
+uint64_to_char(uint8_t* out, const uint64_t num)
+{
+
+    if (little_endian()) {
+        memcpy(out, &num, 8);
+    } else {
+        out[7] = num & 0xFF;
+        out[6] = (num >> 8) & 0xFF;
+        out[5] = (num >> 16) & 0xFF;
+        out[4] = (num >> 24) & 0xFF;
+        out[3] = (num >> 32) & 0xFF;
+        out[2] = (num >> 40) & 0xFF;
+        out[1] = (num >> 48) & 0xFF;
+        out[0] = (num >> 56) & 0xFF;
     }
 
     return out;
@@ -112,20 +143,21 @@ xorshift_bytes(uint8_t *output, uint8_t seed[8], int o_len)
 {
     uint64_t x;
     int i;
-    int out_size;
+    uint8_t tmp[8];
 
     if (output == NULL || seed == NULL)
         return NULL;
 
-    x = char_to_64(seed);
-    out_size = 0;
-
-    /* Fill the output with random bytes in 64-bit chunks but don't overflow */
-    while (out_size < o_len) {
-        x = xorshift64(x);
-        for (i = 0; i < o_len - out_size && i < 8; i++)
-            output[out_size + i] = x >> (8 * i);
-        out_size += i + 1;
+    x = char_to_uint64(seed);
+    
+    /* Fill with random bytes, generate the next number every 8 bytes */
+    for (i = 0; i < o_len; i++) {
+        if (i % 8 == 0) {
+            /* Generate the next number and convert to char array */
+            x = xorshift64(x);
+            uint64_to_char(tmp, x);
+        }
+        output[i] = tmp[i % 8];
     }
 
     return output;
@@ -146,25 +178,30 @@ xorshift_bytes(uint8_t *output, uint8_t seed[8], int o_len)
 uint8_t*
 to_permutation(uint8_t *output, uint8_t *input, int length)
 {
+
     int *tmp,
         i, j, k,
         pos;
+    uint8_t *out;
 
-    tmp = (int*) malloc(length);
+    tmp = (int*) malloc(length * sizeof(int));
+    out = (uint8_t*) malloc(length);
 
-    memset(tmp, -1, length);
+    memset(tmp, 0, length * sizeof(int));
 
-    /* Convert the input stream into a permutation naively */
     for (i = 0, j = length; i < length && j > 0; i++, j--) {
         pos = input[i] % j;
         for (k = 0; k < length && pos >= 0; k++)
-            if (tmp[k] == -1)
+            if (!tmp[k])
                 pos--;
-        output[k - 1] = i;
-        tmp[k - 1] = i;
+        out[k - 1] = i;
+        tmp[k - 1] = 1;
     }
 
+    memcpy(output, out, length);
+
     free(tmp);
+    free(out);
 
     return output;
 }
@@ -298,9 +335,9 @@ round_key(uint8_t *output, const uint8_t *key, const uint32_t length)
 
     if (length == 16) {
         /* Split the key into the three pieces */
-        l0 = char_to_32(key);
-        l1 = char_to_32(key + 4);
-        r = char_to_64(key + 8);
+        l0 = char_to_uint32(key);
+        l1 = char_to_uint32(key + 4);
+        r = char_to_uint64(key + 8);
 
         /* Apply the initial PRNG functions to each piece */
         l0 = lcg(l0);
@@ -346,12 +383,13 @@ cipher(uint8_t output[BLOCKSIZE], uint8_t *key, int keylen,
 {
     int i, j,
         rounds,
-        decrypt;
+        decrypt,
+        key_index;
     uint8_t **keys,
             P[BLOCKSIZE],
             S[BLOCKSIZE][BLOCKSIZE];
 
-
+    /* Setting keylen to negative invokes decryption */
     if (keylen < 0) {
         keylen *= -1;
         decrypt = 1;
@@ -366,26 +404,28 @@ cipher(uint8_t output[BLOCKSIZE], uint8_t *key, int keylen,
 
     memcpy(output, input, BLOCKSIZE);
 
-    keys = (uint8_t**) malloc(rounds);
-    for (i = 0; i < rounds; i++) {
-        keys[i] = (uint8_t*) malloc(keylen);
-        if (i == 0)
-            round_key(keys[i], key, keylen);
-        else
-            round_key(keys[i], keys[i - 1], keylen);
-    }
-
     rounds = 6 + 6 * keylen / 8;
 
+    /* Pre-compute the round keys */
+    keys = (uint8_t**) malloc(rounds * sizeof(uint8_t*));
     for (i = 0; i < rounds; i++) {
+        keys[i] = (uint8_t*) malloc(BLOCKSIZE);
+        if (i == 0)
+            round_key(keys[i], key, BLOCKSIZE);
+        else
+            round_key(keys[i], keys[i - 1], BLOCKSIZE);
+    }
+
+    for (i = 0; i < rounds; i++) {
+        /* If decrypting, work backwards through the keys */
+        if (decrypt)
+            key_index = rounds - 1 - i;
+        else
+            key_index = i;
+
         /* Generate the P-Box from the key */
-        if (decrypt) {
-            xorshift_bytes(P, keys[rounds - 1], BLOCKSIZE);
-            to_permutation(P, P, BLOCKSIZE);
-        } else {
-            xorshift_bytes(P, keys[i], BLOCKSIZE);
-            to_permutation(P, P, BLOCKSIZE);
-        }
+        xorshift_bytes(P, keys[key_index], BLOCKSIZE);
+        to_permutation(P, P, BLOCKSIZE);
 
         /* Revision: Generate the S-Box from the P-Box */
         xorshift_bytes((uint8_t*) S, P, BLOCKSIZE * BLOCKSIZE);
@@ -394,23 +434,17 @@ cipher(uint8_t output[BLOCKSIZE], uint8_t *key, int keylen,
         if (decrypt) {
             /* Xor with the key, then desubstitute and de-permute */
             for (j = 0; j < BLOCKSIZE; j++)
-                output[j] = desubstitute(S, output[j] ^ keys[rounds - 1][j]);
+                output[j] = desubstitute(S, output[j] ^ keys[key_index][j]);
             depermute(output, output, P);
         } else {
             /* Run the block through P and S, then xor with K */
             permute(output, output, P);
-
-            /*
-             *  TODO: Somehow the code is Segfaulting in this loop
-             */
             for (j = 0; j < BLOCKSIZE; j++)
-                output[j] = substitute(S, output[j] ^ keys[i][j]);
-
-
-
+                output[j] = substitute(S, output[j]) ^ keys[key_index][j];
         }
     }
-    
+
+    /* Cleanup */
     for (i = 0; i < rounds; i++)
         free(keys[i]);
     free(keys);
@@ -423,36 +457,33 @@ main(int argc, char **argv)
 {
     uint8_t input[BLOCKSIZE],
             key[BLOCKSIZE],
-            output[BLOCKSIZE];
+            output[BLOCKSIZE],
+            dec[BLOCKSIZE];
     int i;
 
-    printf("KEY  :");
+    printf("KEY  : ");
     for (i = 0; i < BLOCKSIZE; i++)
-        printf("%02x", (key[i] = 32 + i));
+        printf("%02x ", (key[i] = 32 + i));
     printf("\n");
 
-    printf("PTEXT:");
+    printf("INPUT: ");
     for (i = 0; i < BLOCKSIZE; i++)
-        printf("%02x", (input[i] = 65 + i));
+        printf("%02x ", (input[i] = 65 + i));
     printf("\n");
 
-    cipher(output, key, BLOCKSIZE, input);
+     cipher(output, key, BLOCKSIZE, input);
 
-    printf("CTEXT:");
+    printf("CTEXT: ");
     for (i = 0; i < BLOCKSIZE; i++)
-        printf("%02x", output[i]);
+        printf("%02x ", output[i]);
     printf("\n");
 
-    /*
-    uint8_t key[16];
-    int i;
+    cipher(dec, key, BLOCKSIZE * -1, output);
 
-    for (i = 0; i < 16; i++)
-        printf("%02x", (key[i] = 65 + i));
+    printf("PTEXT: ");
+    for (i = 0; i < BLOCKSIZE; i++)
+        printf("%02x ", dec[i]);
     printf("\n");
-
-    round_key(key, 16, key);
-    */
 
     return 0;
 }
