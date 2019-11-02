@@ -27,10 +27,13 @@ const int endian_checker = 1;
 #define FAIL     1
 
 uint32_t
-char_to_32(const uint8_t chars[4]);
+char_to_uint32(const uint8_t chars[4]);
 
 uint64_t
-char_to_64(const uint8_t chars[8]);
+char_to_uint64(const uint8_t chars[8]);
+
+uint8_t*
+uint64_to_char(uint8_t *out, const uint64_t num);
 
 uint32_t
 lcg(uint32_t seed);
@@ -51,13 +54,18 @@ uint8_t
 desubstitute(uint8_t S[BLOCKSIZE][BLOCKSIZE], uint8_t input);
 
 uint8_t*
-permute(uint8_t output[BLOCKSIZE], uint8_t data[BLOCKSIZE], uint8_t P[BLOCKSIZE]);
+permute(uint8_t output[BLOCKSIZE], uint8_t data[BLOCKSIZE],
+        uint8_t P[BLOCKSIZE]);
+
+uint8_t*
+depermute(uint8_t output[BLOCKSIZE], uint8_t data[BLOCKSIZE],
+        uint8_t P[BLOCKSIZE]);
 
 uint8_t*
 round_key(uint8_t *output, const uint8_t *key, const uint32_t length);
 
 uint8_t*
 cipher(uint8_t output[BLOCKSIZE], uint8_t *key, int keylen,
-        uint8_t ptext[BLOCKSIZE]);
+        uint8_t input[BLOCKSIZE]);
 
 #endif
