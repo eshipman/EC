@@ -38,8 +38,13 @@ The S-Boxes are 'filled' from the P-Boxes by simply copying every 2 bytes as 1 r
 ### Key Schedule
 The key schedules were originally an LCG or Xorshift applied to the key iteratively, however this design was deemed too simple. The current design for the key schedule is a series of LCGs and Xorshifts applied to different pieces of the key in a hierarchical Feistel-like structure, as shown in the diagram ```Key_Schedule.png``` under EC-1's subdirectory.
 
+### Weaknesses
+As I was implementing EC-1, I noticed several weaknesses. I continued to implement it despite this fact, so that I would have a reference to start from.
+The list of weaknesses that I know about is as follows:
+ - Changing 1 byte of the plaintext affects only 1 byte of the ciphertext. This is because of the small size of EC-1's S-Boxes and poor diffusion between channels of data.
+
 ## Future
-In the future (assuming I still maintain this repository), I will hopefully perform security analysis on the ciphers. In light of any attacks on the ciphers, I will attempt to redesign them to resist the attacks. Each new cipher will be given a new number (e.g: EC-1, EC-2, EC-3, etc.). However, if a design change does not really constitute a new cipher, it will be given an additional letter (e.g: EC-1K, EC-1S, EC-1X, etc.) which will depend on what change was made.
+In the future (assuming I still maintain this repository), I will hopefully perform security analysis on the ciphers. In light of any attacks on the ciphers, I will attempt to redesign them to resist the attacks. Each new cipher will be given a new number (e.g: EC-1, EC-2, EC-3, etc.). However, if a design change does not really constitute a new cipher, it will be given an additional letter (e.g: EC-1A, EC-1B, EC-1C, etc.).
 
 
 ## What you can do
