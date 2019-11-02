@@ -274,6 +274,59 @@ desubstitute(uint8_t S[BLOCKSIZE][BLOCKSIZE], uint8_t input)
 }
 
 /*
+ * FUNCTION: blend
+ * ---------------
+ * Add diffusion to the cipher by blending the bytes with their neighbors.
+ *
+ * INPUT:
+ *  output: The destination to store the bytes
+ *  input : The bytes to blend
+ *
+ * RETURN: A pointer to the blended bytes
+ */
+uint8_t*
+blend(uint8_t output[BLOCKSIZE], uint8_t input[BLOCKSIZE])
+{
+    /* Work in a temp array so one can use the same data for input and output */
+    uint8_t tmp[BLOCKSIZE];
+    int i;
+
+    tmp[0] = (input[0] & 0xF0) | input[15] & 0x0F;
+    for (i = 1; i < BLOCKSIZE; i++)
+        tmp[i] = (input[i] & 0xF0) | (input[i - 1] & 0x0F);
+
+    /* Copy to the output and return */
+    memcpy(output, tmp, BLOCKSIZE);
+
+    return output;
+}
+
+/*
+ * FUNCTION: deblend
+ * -----------------
+ * Reverse blending on the input.
+ *
+ * INPUT:
+ *  output: The destination to store the rectified bytes
+ *  input : The bytes to be rectified
+ *
+ * RETURN: A pointer to the rectified bytes
+ */
+uint8_t*
+deblend(uint8_t output[BLOCKSIZE], uint8_t input[BLOCKSIZE])
+{
+    uint8_t tmp[BLOCKSIZE];
+    int i;
+
+    for (i = 0; i < BLOCKSIZE; i++)
+        tmp[i] = (input[i] & 0xF0) | (input[(i + 1) % BLOCKSIZE] & 0x0F);
+
+    /* Copy to the output and return */
+    memcpy(output, tmp, BLOCKSIZE);
+    return output;
+}
+
+/*
  * FUNCTION: permute
  * -----------------
  * Permute the data according to the P-Box
@@ -460,6 +513,9 @@ cipher(uint8_t output[BLOCKSIZE], uint8_t *key, int keylen,
         to_permutation((uint8_t*) S, (uint8_t*) S, BLOCKSIZE * BLOCKSIZE);
 
         if (decrypt) {
+            /* Rectify the blended bytes */
+            deblend(output, output);
+
             /* Xor with the key, then desubstitute and de-permute */
             for (j = 0; j < BLOCKSIZE; j++)
                 output[j] = desubstitute(S, output[j] ^ keys[key_index][j]);
@@ -469,6 +525,9 @@ cipher(uint8_t output[BLOCKSIZE], uint8_t *key, int keylen,
             permute(output, output, P);
             for (j = 0; j < BLOCKSIZE; j++)
                 output[j] = substitute(S, output[j]) ^ keys[key_index][j];
+
+            /* Revision: Blend the data at the end of the round */
+            blend(output, output);
         }
     }
 
