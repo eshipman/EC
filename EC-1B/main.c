@@ -291,7 +291,7 @@ blend(uint8_t output[BLOCKSIZE], uint8_t input[BLOCKSIZE])
     uint8_t tmp[BLOCKSIZE];
     int i;
 
-    tmp[0] = (input[0] & 0xF0) | input[15] & 0x0F;
+    tmp[0] = (input[0] & 0xF0) | (input[15] & 0x0F);
     for (i = 1; i < BLOCKSIZE; i++)
         tmp[i] = (input[i] & 0xF0) | (input[i - 1] & 0x0F);
 
